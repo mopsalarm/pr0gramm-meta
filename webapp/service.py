@@ -24,12 +24,12 @@ def get_reposts(lower, upper):
     return [item_id for item_id, in database.execute(query, [lower, upper]).fetchall()]
 
 
-@bottle.get("/items/<first_id:int>/<second_id:int>")
-def items(first_id, second_id):
+@bottle.get("/items/new/between/<first_id:int>/<second_id:int>")
+def items_between(first_id, second_id):
     start_time = time.time()
 
     lower = min(first_id, second_id)
-    upper = min(lower + 150, max(first_id, second_id))
+    upper = min(lower + 500, max(first_id, second_id))
 
     result = dict(
         sizes=get_sizes(lower, upper),
@@ -38,3 +38,12 @@ def items(first_id, second_id):
 
     result["duration"] = time.time() - start_time
     return result
+
+@bottle.get("/items/new/before/<first_id:int>")
+def items_before(first_id):
+	return items_between(first_id, first_id - 500)
+
+@bottle.get("/items/new/after/<first_id:int>")
+def items_before(first_id):
+	return items_between(first_id, first_id + 500)
+

@@ -227,7 +227,9 @@ def main():
         logger.info("Processing items {} to {} (age ~{:1.1f} hours)", items[0].id, items[-1].id, age)
         store_items(db, items)
         update_item_sizes(db, items)
-        update_item_infos(db, items)
+        
+        if age < 48:
+	        update_item_infos(db, items)
 
 
 if __name__ == '__main__':
