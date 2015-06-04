@@ -18,57 +18,57 @@ print "open database at pr0gramm-meta.sqlite3"
 database = sqlite3.connect("pr0gramm-meta.sqlite3")
 
 
-def get_sizes(lower, upper, promoted):
+def get_sizes(where_clause):
     query = "SELECT items.id, width, height FROM items" \
-            " JOIN sizes ON items.id==sizes.id " \
-            " WHERE items.id>=? AND items.id<=? %s" \
-            " LIMIT 150" % ("AND items.promoted!=0" if promoted else "")
+            " JOIN sizes ON items.id=sizes.id " \
+            " WHERE %s" \
+            " LIMIT 150" % where_clause
 
     return [
         dict(id=item_id, width=width, height=height)
-        for item_id, width, height in database.execute(query, [lower, upper]).fetchall()
+        for item_id, width, height in database.execute(query).fetchall()
     ]
 
 
-def get_reposts(lower, upper, promoted):
+def get_reposts(where_clause):
     query = "SELECT DISTINCT items.id FROM items " \
-            " JOIN tags ON items.id==tags.item_id " \
-            " WHERE items.id>=? AND items.id<=?" \
-            "       AND tags.confidence>0.3 AND tags.tag=='repost' COLLATE NOCASE %s" \
-            " LIMIT 150" % ("AND items.promoted!=0" if promoted else "")
+            " JOIN tags ON items.id=tags.item_id " \
+            " WHERE %s AND tags.confidence>0.05 AND tags.tag='repost' COLLATE NOCASE" \
+            " LIMIT 150" % where_clause
 
-    return [item_id for item_id, in database.execute(query, [lower, upper]).fetchall()]
+    return [item_id for item_id, in database.execute(query).fetchall()]
 
 
 @stats.timed("pr0gramm.meta.webapp.lookup")
-def lookup_items_between(first_id, second_id, promoted):
+def lookup_items(where_clause):
     start_time = time.time()
 
-    lower = max(1, min(first_id, second_id))
-    upper = max(first_id, second_id)
-
     result = dict(
-        sizes=get_sizes(lower, upper, promoted),
-        repost=get_reposts(lower, upper, promoted)
+        sizes=get_sizes(where_clause),
+        reposts=get_reposts(where_clause)
     )
 
     result["duration"] = time.time() - start_time
     return result
 
 
-for urlstr, promoted in dict(new=False, top=True).items():
-    # noinspection PyShadowingNames
-    def generate(promoted):
-        @bottle.get("/items/%s/between/<first_id:int>/<second_id:int>" % urlstr)
-        def items_between(first_id, second_id):
-            return lookup_items_between(first_id, second_id, promoted)
+@bottle.get("/items/new/before/<upper_id:int>")
+def items_before(upper_id):
+    return lookup_items("items.id<=%d" % upper_id)
 
-        @bottle.get("/items/%s/before/<first_id:int>" % urlstr)
-        def items_before(first_id):
-            return lookup_items_between(first_id, first_id - 500, promoted)
+@bottle.get("/items/new/after/<lower_id:int>")
+def items_after(lower_id):
+    return lookup_items("items.id>=%d" % lower_id)
 
-        @bottle.get("/items/%s/after/<first_id:int>" % urlstr)
-        def items_before(first_id):
-            return lookup_items_between(first_id, first_id + 500, promoted)
+@bottle.get("/items/top/before/<upper_id:int>")
+def items_before(upper_id):
+    return lookup_items("items.id<=%d and promoted!=0" % upper_id)
 
-    generate(promoted)
+@bottle.get("/items/top/after/<lower_id:int>")
+def items_after(lower_id):
+    return lookup_items("items.id>=%d and promoted!=0" % lower_id)
+
+@bottle.get("/items")
+def items():
+    item_ids = [int(val) for val in bottle.request.params.get("ids", []).split(",") if val]
+    return lookup_items("items.id IN (%s)" % ",".join(str(val) for val in item_ids))
