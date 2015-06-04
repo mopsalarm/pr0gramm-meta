@@ -269,12 +269,14 @@ def main():
     db = sqlite3.connect("pr0gramm-meta.sqlite3")
     create_database_tables(db)
 
-    schedule(60, "pr0gramm.meta.update.sizes", run, db, (0, 0.5, update_item_sizes), (0, 0.5, update_item_infos))
-    schedule(600, "pr0gramm.meta.update.infos.new", run, db, (0, 6, update_item_infos))
-    schedule(3600, "pr0gramm.meta.update.infos.more", run, db, (5, 48, update_item_infos))
+    def start():
+        yield schedule(60, "pr0gramm.meta.update.sizes", run, db, (0, 0.5, update_item_sizes), (0, 0.5, update_item_infos))
+        yield schedule(600, "pr0gramm.meta.update.infos.new", run, db, (0, 6, update_item_infos))
+        yield schedule(3600, "pr0gramm.meta.update.infos.more", run, db, (5, 48, update_item_infos))
 
-    run(db, (48, 24 * 7, update_item_infos))
+        yield gevent.spawn(run, db, (48, 24 * 7, update_item_infos))
 
+    gevent.joinall(start())
 
 if __name__ == '__main__':
     file_handler = logbook.FileHandler("logfile.log", bubble=True)
