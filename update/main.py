@@ -241,7 +241,7 @@ def schedule(interval, metric, func, *args, **kwargs):
 
             gevent.sleep(interval)
 
-    gevent.spawn(worker)
+    return gevent.spawn(worker)
 
 
 def run(db, *functions):
