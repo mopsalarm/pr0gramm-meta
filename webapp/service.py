@@ -51,24 +51,9 @@ def lookup_items(where_clause):
     result["duration"] = time.time() - start_time
     return result
 
-
-@bottle.get("/items/new/before/<upper_id:int>")
-def items_before(upper_id):
-    return lookup_items("items.id<=%d" % upper_id)
-
-@bottle.get("/items/new/after/<lower_id:int>")
-def items_after(lower_id):
-    return lookup_items("items.id>=%d" % lower_id)
-
-@bottle.get("/items/top/before/<upper_id:int>")
-def items_before(upper_id):
-    return lookup_items("items.id<=%d and promoted!=0" % upper_id)
-
-@bottle.get("/items/top/after/<lower_id:int>")
-def items_after(lower_id):
-    return lookup_items("items.id>=%d and promoted!=0" % lower_id)
-
 @bottle.get("/items")
 def items():
     item_ids = [int(val) for val in bottle.request.params.get("ids", []).split(",") if val]
+    item_ids = item_ids[:150]
+
     return lookup_items("items.id IN (%s)" % ",".join(str(val) for val in item_ids))
