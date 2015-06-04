@@ -1,19 +1,29 @@
 from __future__ import division
-import argparse
+
+import gevent.monkey
+
+gevent.monkey.patch_all()
+
 import subprocess
 import re
 import sqlite3
 import itertools
 import time
+import gevent
 
 from collections import namedtuple
 
 from PIL import Image
 import logbook
 import requests
-
+import datadog
 
 logger = logbook.Logger("pr0gramm-meta")
+
+logger.info("initialize datadog metrics")
+datadog.initialize()
+stats = datadog.ThreadStats()
+stats.start(flush_in_greenlet=True)
 
 Item = namedtuple("Item", ["id", "promoted", "up", "down",
                            "created", "image", "thumb", "fullsize", "source", "flags",
@@ -22,18 +32,22 @@ Item = namedtuple("Item", ["id", "promoted", "up", "down",
 Tag = namedtuple("Tag", ["id", "item_id", "confidence", "tag"])
 
 
-def iterate_posts():
+def metric_name(suffix):
+    return "pr0gramm.meta.update." + suffix
+
+
+def iterate_posts(start=None):
     base_url = "http://pr0gramm.com/api/items/get?flags=7"
-    start = None
 
     while True:
         url = base_url + "&older=%d" % start if start else base_url
 
         # :type: requests.Response
-        response = requests.get(url)
-        response.raise_for_status()
+        with stats.timer(metric_name("request.feed")):
+            response = requests.get(url)
+            response.raise_for_status()
+            json = response.json()
 
-        json = response.json()
         for item in json["items"]:
             item = Item(**item)
             start = min(start or item.id, item.id)
@@ -53,6 +67,7 @@ def chunker(n, iterable):
         yield chunk
 
 
+@stats.timed(metric_name("request.size"), tags=["image"])
 def get_image_size(image_url, size=1024):
     # :type: requests.Response
     response = requests.get(image_url, headers={"Range": "bytes=0-%d" % (size - 1)}, stream=True)
@@ -65,6 +80,7 @@ def get_image_size(image_url, size=1024):
         response.close()
 
 
+@stats.timed(metric_name("request.size"), tags=["video"])
 def get_video_size(video_url, size=16 * 1024):
     # :type: requests.Response
     response = requests.get(video_url, headers={"Range": "bytes=0-%d" % (size - 1)})
@@ -139,6 +155,7 @@ def update_item_sizes(database, items):
             database.execute("INSERT OR REPLACE INTO sizes VALUES (?, ?, ?)", (item.id, width, height))
 
 
+@stats.timed(metric_name("request.info"))
 def iter_item_tags(item):
     url = "http://pr0gramm.com/api/items/info?itemId=%d" % item.id
 
@@ -170,18 +187,7 @@ def update_item_infos(database, items):
                 database.executemany(stmt, tags)
 
 
-def parse_arguments():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--max-age", metavar="N", type=float, default=48,
-                        help="Maximum age of the item pages to index (in hours). "
-                             "Set to zero to process all items.")
-
-    parser.add_argument("--database", type=str, default="pr0gramm-meta.sqlite3",
-                        help="Filename of the sqlite3 database to use.")
-
-    return parser.parse_args()
-
-
+@stats.timed(metric_name("db.store"))
 def store_items(database, items):
     """
     Stores the given items in the database. They will replace any previously stored items.
@@ -194,10 +200,7 @@ def store_items(database, items):
         database.executemany(stmt, items)
 
 
-def main():
-    args = parse_arguments()
-
-    db = sqlite3.connect(args.database)
+def create_database_tables(db):
     db.execute("""CREATE TABLE IF NOT EXISTS items (
       id INT PRIMARY KEY,
       promoted INT, up INT, down INT, created INT,
@@ -205,7 +208,6 @@ def main():
     )""")
 
     db.execute("CREATE TABLE IF NOT EXISTS sizes (id INT PRIMARY KEY, width INT, height INT)")
-
     db.execute("""CREATE TABLE IF NOT EXISTS tags (
       id INT PRIMARY KEY,
       item_id INT,
@@ -216,20 +218,62 @@ def main():
 
     db.execute("CREATE INDEX IF NOT EXISTS tags_item_id ON tags(item_id)")
 
-    all_items = iterate_posts()
-    for items in chunker(128, all_items):
-        # check for age of items
+
+def schedule(interval, metric, func, *args, **kwargs):
+    def worker():
+        while True:
+            start = time.time()
+
+            # noinspection PyBroadException
+            try:
+                logger.info("Calling scheduled function {} now", metric)
+                func(*args, **kwargs)
+
+                duration = time.time() - start
+                logger.info("{} took {:1.2f}s to complete", metric, duration)
+
+            except KeyboardInterrupt:
+                raise
+
+            except:
+                duration = time.time() - start
+                logger.exception("Ignoring error in scheduled function {} after {}", metric, duration)
+
+            gevent.sleep(interval)
+
+    gevent.spawn(worker)
+
+
+def run(db, *functions):
+    for items in chunker(16, iterate_posts()):
+        stop = True
         age = (time.time() - items[0].created) / 3600
-        if args.max_age and age > args.max_age:
+        for min_age, max_age, function in functions:
+            if age < min_age:
+                stop = False
+                continue
+
+            if age > max_age:
+                continue
+
+            store_items(db, items)
+            function(db, items)
+            stop = False
+
+        if stop:
             break
 
-        # process those items
-        logger.info("Processing items {} to {} (age ~{:1.1f} hours)", items[0].id, items[-1].id, age)
-        store_items(db, items)
-        update_item_sizes(db, items)
-        
-        if age < 48:
-	        update_item_infos(db, items)
+
+def main():
+    logger.info("opening database")
+    db = sqlite3.connect("pr0gramm-meta.sqlite3")
+    create_database_tables(db)
+
+    schedule(60, "pr0gramm.meta.update.sizes", run, db, (0, 0.5, update_item_sizes), (0, 0.5, update_item_infos))
+    schedule(300, "pr0gramm.meta.update.infos.new", run, db, (0, 6, update_item_infos))
+    schedule(3600, "pr0gramm.meta.update.infos.more", run, db, (5, 48, update_item_infos))
+
+    run(db, (48, 24 * 7, update_item_infos))
 
 
 if __name__ == '__main__':
