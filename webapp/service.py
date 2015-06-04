@@ -1,12 +1,20 @@
+import gevent.monkey
+
+gevent.monkey.patch_all()
+
 import sqlite3
 import time
 
 import bottle
+
 import datadog
 
-
+print "initialize datadog metrics"
 datadog.initialize()
+stats = datadog.ThreadStats()
+stats.start(flush_in_greenlet=True)
 
+print "open database at pr0gramm-meta.sqlite3"
 database = sqlite3.connect("pr0gramm-meta.sqlite3")
 
 
@@ -32,7 +40,7 @@ def get_reposts(lower, upper, promoted):
     return [item_id for item_id, in database.execute(query, [lower, upper]).fetchall()]
 
 
-@datadog.statsd.timed("pr0gramm.meta.webapp.lookup")
+@stats.timed("pr0gramm.meta.webapp.lookup")
 def lookup_items_between(first_id, second_id, promoted):
     start_time = time.time()
 
@@ -46,6 +54,7 @@ def lookup_items_between(first_id, second_id, promoted):
 
     result["duration"] = time.time() - start_time
     return result
+
 
 for urlstr, promoted in dict(new=False, top=True).items():
     # noinspection PyShadowingNames
