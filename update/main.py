@@ -155,7 +155,6 @@ def update_item_sizes(database, items):
             database.execute("INSERT OR REPLACE INTO sizes VALUES (?, ?, ?)", (item.id, width, height))
 
 
-@stats.timed(metric_name("request.info"))
 def iter_item_tags(item):
     url = "http://pr0gramm.com/api/items/info?itemId=%d" % item.id
 
@@ -171,7 +170,8 @@ def update_item_infos(database, items):
     for item in items:
         # noinspection PyBroadException
         try:
-            tags = tuple(iter_item_tags(item))
+            with stats.timer(metric_name("request.info")):
+              tags = tuple(iter_item_tags(item))
 
         except KeyboardInterrupt:
             raise
