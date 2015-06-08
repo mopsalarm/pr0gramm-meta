@@ -43,7 +43,6 @@ def get_reposts(where_clause):
 
 @stats.timed(metric_name("lookup"))
 def lookup_items(where_clause):
-    stats.increment(metric_name("request"))
     start_time = time.time()
 
     result = dict(
