@@ -17,6 +17,8 @@ stats.start(flush_in_greenlet=True)
 print "open database at pr0gramm-meta.sqlite3"
 database = sqlite3.connect("pr0gramm-meta.sqlite3")
 
+def metric_name(suffix):
+    return "pr0gramm.meta.webapp.%s" % suffix
 
 def get_sizes(where_clause):
     query = "SELECT items.id, width, height FROM items" \
@@ -39,8 +41,9 @@ def get_reposts(where_clause):
     return [item_id for item_id, in database.execute(query).fetchall()]
 
 
-@stats.timed("pr0gramm.meta.webapp.lookup")
+@stats.timed(metric_name("lookup"))
 def lookup_items(where_clause):
+    stats.increment(metric_name("request"))
     start_time = time.time()
 
     result = dict(
