@@ -54,6 +54,7 @@ def lookup_items(where_clause):
     return result
 
 @bottle.get("/items")
+@bottle.post("/items")
 def items():
     item_ids = [int(val) for val in bottle.request.params.get("ids", []).split(",") if val]
     item_ids = item_ids[:150]
