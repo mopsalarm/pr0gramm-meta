@@ -35,7 +35,7 @@ def get_sizes(where_clause):
 def get_reposts(where_clause):
     query = "SELECT DISTINCT items.id FROM items " \
             " JOIN tags ON items.id=tags.item_id " \
-            " WHERE %s AND tags.confidence>0.05 AND tags.tag='repost' COLLATE NOCASE" \
+            " WHERE %s AND tags.confidence>0.3 AND tags.tag='repost' COLLATE NOCASE" \
             " LIMIT 150" % where_clause
 
     return [item_id for item_id, in database.execute(query).fetchall()]
