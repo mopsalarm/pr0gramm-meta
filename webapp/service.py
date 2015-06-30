@@ -1,12 +1,14 @@
+from StringIO import StringIO
+
 import gevent.monkey
+
 
 gevent.monkey.patch_all()
 
-import sqlite3
 import time
+import sqlite3
 
 import bottle
-
 import datadog
 
 print "initialize datadog metrics"
@@ -17,8 +19,10 @@ stats.start(flush_in_greenlet=True)
 print "open database at pr0gramm-meta.sqlite3"
 database = sqlite3.connect("pr0gramm-meta.sqlite3")
 
+
 def metric_name(suffix):
     return "pr0gramm.meta.webapp.%s" % suffix
+
 
 def get_sizes(where_clause):
     query = "SELECT items.id, width, height FROM items" \
@@ -53,6 +57,7 @@ def lookup_items(where_clause):
     result["duration"] = time.time() - start_time
     return result
 
+
 @bottle.get("/items")
 @bottle.post("/items")
 def items():
@@ -60,3 +65,25 @@ def items():
     item_ids = item_ids[:150]
 
     return lookup_items("items.id IN (%s)" % ",".join(str(val) for val in item_ids))
+
+
+@bottle.get("/objs")
+def objs():
+    import sys
+    import objgraph
+
+    old_stdout = sys.stdout
+    sys.stdout = capture = StringIO()
+    try:
+        print "most common"
+        objgraph.show_most_common_types()
+
+        print "growth"
+        objgraph.show_growth(limit=5)
+
+        print "leaking objects"
+        objgraph.get_leaking_objects()
+        return capture.getvalue()
+
+    finally:
+        sys.stdout = old_stdout
