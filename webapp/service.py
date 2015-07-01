@@ -1,10 +1,5 @@
 from StringIO import StringIO
 
-import gevent.monkey
-
-
-gevent.monkey.patch_all()
-
 import time
 import sqlite3
 
@@ -14,7 +9,7 @@ import datadog
 print "initialize datadog metrics"
 datadog.initialize()
 stats = datadog.ThreadStats()
-stats.start(flush_in_greenlet=True)
+stats.start(flush_in_greenlet=False)
 
 print "open database at pr0gramm-meta.sqlite3"
 database = sqlite3.connect("pr0gramm-meta.sqlite3")
