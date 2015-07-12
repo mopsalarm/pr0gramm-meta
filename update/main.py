@@ -10,8 +10,10 @@ import sqlite3
 import itertools
 import time
 import gevent
+import gevent.queue
 
 from collections import namedtuple
+from attrdict import AttrDict as attrdict
 
 from PIL import Image
 import logbook
@@ -31,9 +33,32 @@ Item = namedtuple("Item", ["id", "promoted", "up", "down",
 
 Tag = namedtuple("Tag", ["id", "item_id", "confidence", "tag"])
 
+User = namedtuple("User", ["id", "name", "registered", "score"])
+
 
 def metric_name(suffix):
     return "pr0gramm.meta.update." + suffix
+
+
+class UserNameQueue(object):
+    def __init__(self):
+        self.queue = gevent.queue.Queue()
+        self.names = set()
+
+    def put(self, name):
+        if name.lower() not in self.names and len(self.names) < 150000:
+            self.names.add(name.lower())
+            self.queue.put(name)
+
+    def get(self):
+        stats.gauge(metric_name("queue.users"), self.queue.qsize())
+
+        name = self.queue.get()
+        self.names.discard(name.lower())
+        return name
+
+# just put a user in this queue to download its details
+user_queue = UserNameQueue()
 
 
 def iterate_posts(start=None):
@@ -65,6 +90,35 @@ def chunker(n, iterable):
             return
 
         yield chunk
+
+
+def get_user_details(name):
+    url = "http://pr0gramm.com/api/profile/info"
+    with stats.timer(metric_name("request.user")):
+        response = requests.get(url, params={"name": name, "flags": "1"})
+        user = attrdict(response.json()).user
+
+    # convert to named tuple
+    return User(user.id, user.name, user.registered, user.score)
+
+
+def store_user_details(db, details):
+    with db:
+        db.execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?)", details)
+        db.execute("INSERT OR REPLACE INTO user_score VALUES (?, ?, ?)",
+                   [details.id, int(time.time()), details.score])
+
+
+def update_user_details(db):
+    while True:
+        user = user_queue.get()
+        try:
+            # noinspection PyTypeChecker
+            store_user_details(db, get_user_details(user))
+        except IOError:
+            pass
+
+        gevent.sleep(0.5)
 
 
 @stats.timed(metric_name("request.size"), tags=["image"])
@@ -168,10 +222,12 @@ def iter_item_tags(item):
 
 def update_item_infos(database, items):
     for item in items:
+        user_queue.put(item.user)
+
         # noinspection PyBroadException
         try:
             with stats.timer(metric_name("request.info")):
-              tags = tuple(iter_item_tags(item))
+                tags = tuple(iter_item_tags(item))
 
         except KeyboardInterrupt:
             raise
@@ -216,28 +272,42 @@ def create_database_tables(db):
       FOREIGN KEY (item_id) REFERENCES items(id)
     )""")
 
+    db.execute("""CREATE TABLE IF NOT EXISTS users (
+      id INT PRIMARY KEY,
+      name TEXT,
+      registered INT,
+      score INT)
+    """)
+
+    db.execute("""CREATE TABLE IF NOT EXISTS user_score (
+      user_id INT,
+      timestamp INT,
+      score INT,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )""")
+
     db.execute("CREATE INDEX IF NOT EXISTS tags_item_id ON tags(item_id)")
 
 
-def schedule(interval, metric, func, *args, **kwargs):
+def schedule(interval, name, func, *args, **kwargs):
     def worker():
         while True:
             start = time.time()
 
             # noinspection PyBroadException
             try:
-                logger.info("Calling scheduled function {} now", metric)
+                logger.info("Calling scheduled function {} now", name)
                 func(*args, **kwargs)
 
                 duration = time.time() - start
-                logger.info("{} took {:1.2f}s to complete", metric, duration)
+                logger.info("{} took {:1.2f}s to complete", name, duration)
 
             except KeyboardInterrupt:
                 raise
 
             except:
                 duration = time.time() - start
-                logger.exception("Ignoring error in scheduled function {} after {}", metric, duration)
+                logger.exception("Ignoring error in scheduled function {} after {}", name, duration)
 
             gevent.sleep(interval)
 
@@ -270,6 +340,8 @@ def main():
     create_database_tables(db)
 
     def start():
+        yield schedule(1, "pr0gramm.meta.update.users", update_user_details, db)
+
         yield schedule(60, "pr0gramm.meta.update.sizes",
                        run, db, (0, 0.5, update_item_sizes), (0, 0.5, update_item_infos))
 
@@ -279,9 +351,11 @@ def main():
         yield schedule(3600, "pr0gramm.meta.update.infos.more",
                        run, db, (5, 48, update_item_infos))
 
-        yield gevent.spawn(run, db, (48, 24 * 7, update_item_infos))
+        yield schedule(24 * 3600, "pr0gramm.meta.update.infos.day",
+                       run, db, (47, 24 * 7, update_item_infos))
 
     gevent.joinall(tuple(start()))
+
 
 if __name__ == '__main__':
     file_handler = logbook.FileHandler("logfile.log", bubble=True)
