@@ -215,8 +215,13 @@ def iter_item_tags(item):
     # :type: requests.Response
     response = requests.get(url)
     response.raise_for_status()
+    info = response.json()
 
-    for tag in response.json().get("tags", []):
+    # enqueue the commenters names
+    for comment in info.get("comments", []):
+        user_queue.put(comment["name"])
+
+    for tag in info.get("tags", []):
         yield Tag(tag["id"], item.id, tag["confidence"], tag["tag"])
 
 
