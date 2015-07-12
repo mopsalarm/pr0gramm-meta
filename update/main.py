@@ -118,8 +118,6 @@ def update_user_details(db):
         except IOError:
             pass
 
-        gevent.sleep(0.5)
-
 
 @stats.timed(metric_name("request.size"), tags=["image"])
 def get_image_size(image_url, size=1024):
