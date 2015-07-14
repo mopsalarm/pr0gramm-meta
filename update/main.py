@@ -92,11 +92,11 @@ def chunker(n, iterable):
         yield chunk
 
 
+@stats.timed(metric_name("request.user"))
 def get_user_details(name):
     url = "http://pr0gramm.com/api/profile/info"
-    with stats.timer(metric_name("request.user")):
-        response = requests.get(url, params={"name": name, "flags": "1"})
-        user = attrdict(response.json()).user
+    response = requests.get(url, params={"name": name, "flags": "1"})
+    user = attrdict(response.json()).user
 
     # convert to named tuple
     return User(user.id, user.name, user.registered, user.score)
@@ -115,6 +115,7 @@ def update_user_details(db):
         try:
             # noinspection PyTypeChecker
             store_user_details(db, get_user_details(user))
+            gevent.sleep(0.5)
         except IOError:
             pass
 
