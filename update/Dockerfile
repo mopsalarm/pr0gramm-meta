@@ -1,4 +1,4 @@
-from python:2-onbuild
+from python:3-onbuild
 MAINTAINER Mopsalarm
 
 RUN apt-get update && apt-get install -y --force-yes libav-tools && apt-get clean

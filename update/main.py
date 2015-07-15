@@ -1,5 +1,4 @@
-from __future__ import division
-
+import pathlib
 import gevent.monkey
 
 gevent.monkey.patch_all()
@@ -19,6 +18,9 @@ from PIL import Image
 import logbook
 import requests
 import datadog
+import broke
+
+import json as _json
 
 logger = logbook.Logger("pr0gramm-meta")
 
@@ -26,6 +28,8 @@ logger.info("initialize datadog metrics")
 datadog.initialize()
 stats = datadog.ThreadStats()
 stats.start(flush_in_greenlet=True)
+
+
 
 Item = namedtuple("Item", ["id", "promoted", "up", "down",
                            "created", "image", "thumb", "fullsize", "source", "flags",
@@ -35,6 +39,9 @@ Tag = namedtuple("Tag", ["id", "item_id", "confidence", "tag"])
 
 User = namedtuple("User", ["id", "name", "registered", "score"])
 
+# ensure that the file exists
+pathlib.Path("pr0gramm.broke").touch()
+broker = broke.BrokeWriter("pr0gramm.broke")
 
 def metric_name(suffix):
     return "pr0gramm.meta.update." + suffix
@@ -63,7 +70,6 @@ user_queue = UserNameQueue()
 
 def iterate_posts(start=None):
     base_url = "http://pr0gramm.com/api/items/get?flags=7"
-
     while True:
         url = base_url + "&older=%d" % start if start else base_url
 
@@ -72,6 +78,9 @@ def iterate_posts(start=None):
             response = requests.get(url)
             response.raise_for_status()
             json = response.json()
+
+        # dump back to broker
+        broker.store("api.items.get", _json.dumps(json).encode("utf8"))
 
         for item in json["items"]:
             item = Item(**item)
@@ -96,7 +105,11 @@ def chunker(n, iterable):
 def get_user_details(name):
     url = "http://pr0gramm.com/api/profile/info"
     response = requests.get(url, params={"name": name, "flags": "1"})
-    user = attrdict(response.json()).user
+    content = response.json()
+    user = attrdict(content).user
+
+    # dump back to broker
+    broker.store("api.profile.info", _json.dumps(content).encode("utf8"))
 
     # convert to named tuple
     return User(user.id, user.name, user.registered, user.score)
@@ -115,7 +128,7 @@ def update_user_details(db):
         try:
             # noinspection PyTypeChecker
             store_user_details(db, get_user_details(user))
-            gevent.sleep(0.5)
+            gevent.sleep(0.4)
         except IOError:
             pass
 
@@ -146,7 +159,7 @@ def get_video_size(video_url, size=16 * 1024):
     stdout, stderr = process.communicate(response.content)
 
     # and extract result from output
-    width, height = re.search(r"Stream.* ([0-9]+)x([0-9]+)", stdout + stderr).groups()
+    width, height = re.search(br"Stream.* ([0-9]+)x([0-9]+)", stdout + stderr).groups()
     return int(width), int(height)
 
 
@@ -216,6 +229,9 @@ def iter_item_tags(item):
     response.raise_for_status()
     info = response.json()
 
+    # dump back to broker
+    broker.store("api.items.info", _json.dumps(info).encode("utf8"))
+
     # enqueue the commenters names
     for comment in info.get("comments", []):
         user_queue.put(comment["name"])
@@ -258,6 +274,14 @@ def store_items(database, items):
     with database:
         stmt = "INSERT OR REPLACE INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
         database.executemany(stmt, items)
+
+@stats.timed(metric_name("broker.commit"))
+def broker_commit():
+    if broker.dirty:
+        logger.info("Committing broker to filesystem now")
+        broker.commit()
+    else:
+        logger.info("Broker is empty, nothing to commit")
 
 
 def create_database_tables(db):
@@ -358,7 +382,13 @@ def main():
         yield schedule(24 * 3600, "pr0gramm.meta.update.infos.day",
                        run, db, (47, 24 * 7, update_item_infos))
 
-    gevent.joinall(tuple(start()))
+        gevent.sleep(15)
+        yield schedule(30, "app.broke.commit", broker_commit)
+
+    try:
+        gevent.joinall(tuple(start()))
+    except KeyboardInterrupt:
+        broker_commit()
 
 
 if __name__ == '__main__':
