@@ -1,25 +1,25 @@
-from StringIO import StringIO
-
 import time
 import sqlite3
 
 import bottle
 import datadog
+from attrdict import AttrDict as attrdict
 
-print "initialize datadog metrics"
+
+print("initialize datadog metrics")
 datadog.initialize()
 stats = datadog.ThreadStats()
-stats.start(flush_in_greenlet=False)
+stats.start()
 
-print "open database at pr0gramm-meta.sqlite3"
-database = sqlite3.connect("pr0gramm-meta.sqlite3")
+print("open database at pr0gramm-meta.sqlite3")
+database = sqlite3.connect("pr0gramm-meta.sqlite3", timeout=1)
 
 
 def metric_name(suffix):
     return "pr0gramm.meta.webapp.%s" % suffix
 
 
-def get_sizes(where_clause):
+def query_sizes(where_clause):
     query = "SELECT items.id, width, height FROM items" \
             " JOIN sizes ON items.id=sizes.id " \
             " WHERE %s" \
@@ -31,7 +31,7 @@ def get_sizes(where_clause):
     ]
 
 
-def get_reposts(where_clause):
+def query_reposts(where_clause):
     query = "SELECT DISTINCT items.id FROM items " \
             " JOIN tags ON items.id=tags.item_id " \
             " WHERE %s AND tags.confidence>0.3 AND tags.tag='repost' COLLATE NOCASE" \
@@ -40,45 +40,27 @@ def get_reposts(where_clause):
     return [item_id for item_id, in database.execute(query).fetchall()]
 
 
-@stats.timed(metric_name("lookup"))
-def lookup_items(where_clause):
+@bottle.get("/items")
+@bottle.post("/items")
+@stats.timed(metric_name("request.items"))
+def items():
     start_time = time.time()
+    item_ids = [int(val) for val in bottle.request.params.get("ids", []).split(",") if val][:150]
 
-    result = dict(
-        sizes=get_sizes(where_clause),
-        reposts=get_reposts(where_clause)
-    )
+    where_clause = "items.id IN (%s)" % ",".join(str(val) for val in item_ids)
 
-    result["duration"] = time.time() - start_time
+    result = attrdict()
+    result.sizes = query_sizes(where_clause)
+    result.reposts = query_reposts(where_clause)
+    result.duration = time.time() - start_time
     return result
 
 
-@bottle.get("/items")
-@bottle.post("/items")
-def items():
-    item_ids = [int(val) for val in bottle.request.params.get("ids", []).split(",") if val]
-    item_ids = item_ids[:150]
+@bottle.get("/user/<user>")
+@stats.timed(metric_name("request.user"))
+def user_benis(user):
+    query = "SELECT user_score.timestamp, user_score.score" \
+            " FROM user_score, users" \
+            " WHERE users.name=? COLLATE NOCASE AND users.id=user_score.user_id"
 
-    return lookup_items("items.id IN (%s)" % ",".join(str(val) for val in item_ids))
-
-
-@bottle.get("/objs")
-def objs():
-    import sys
-    import objgraph
-
-    old_stdout = sys.stdout
-    sys.stdout = capture = StringIO()
-    try:
-        print "most common"
-        objgraph.show_most_common_types()
-
-        print "growth"
-        objgraph.show_growth(limit=5)
-
-        print "leaking objects"
-        objgraph.get_leaking_objects()
-        return capture.getvalue()
-
-    finally:
-        sys.stdout = old_stdout
+    return {"benisHistory": database.execute(query, [user]).fetchall()}
