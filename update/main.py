@@ -154,7 +154,7 @@ def get_video_size(video_url, size=16 * 1024):
 
     # ask avprobe for the size of the image
     process = subprocess.Popen(
-        ["avprobe", "-"], shell=False, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        ["ffprobe", "-"], shell=False, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     stdout, stderr = process.communicate(response.content)
 
