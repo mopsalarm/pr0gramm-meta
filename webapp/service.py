@@ -61,6 +61,7 @@ def items():
 def user_benis(user):
     query = "SELECT user_score.timestamp, user_score.score" \
             " FROM user_score, users" \
-            " WHERE users.name=? COLLATE NOCASE AND users.id=user_score.user_id"
+            " WHERE users.name=? COLLATE NOCASE AND users.id=user_score.user_id AND user_score.timestamp>?"
 
-    return {"benisHistory": database.execute(query, [user]).fetchall()}
+    start_time = int(time.time() - 3600 * 24 * 7)
+    return {"benisHistory": database.execute(query, [user, start_time]).fetchall()}
