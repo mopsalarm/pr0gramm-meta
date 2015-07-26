@@ -5,7 +5,7 @@ RUN curl http://johnvansickle.com/ffmpeg/releases/ffmpeg-release-64bit-static.ta
     | xz -d \
     | tar xC /usr/bin --strip-components=1
 
-RUN apk del git tar xz && apk cache clean
+RUN apk del git tar xz
 RUN mkdir -p /data
 
 WORKDIR /data
