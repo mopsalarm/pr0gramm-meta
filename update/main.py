@@ -128,7 +128,7 @@ def update_user_details(db):
         try:
             # noinspection PyTypeChecker
             store_user_details(db, get_user_details(user))
-            gevent.sleep(0.4)
+            gevent.sleep(1)
         except IOError:
             pass
 
@@ -385,7 +385,7 @@ def main():
                        run, db, (47, 24 * 7, update_item_infos))
 
         gevent.sleep(15)
-        yield schedule(30, "app.broke.commit", broker_commit)
+        yield schedule(300, "app.broke.commit", broker_commit)
 
     try:
         gevent.joinall(tuple(start()))
