@@ -315,7 +315,6 @@ def create_database_tables(db):
     )""")
 
     db.execute("CREATE INDEX IF NOT EXISTS tags_item_id ON tags(item_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS tags_tag ON tags(tag COLLATE NOCASE)")
     db.execute("CREATE INDEX IF NOT EXISTS users_name ON users(name COLLATE NOCASE)")
     db.execute("CREATE INDEX IF NOT EXISTS user_score__user_id__timestamp ON user_score(user_id, timestamp)")
 
