@@ -22,9 +22,8 @@ def metric_name(suffix):
 
 
 def query_sizes(database, item_ids):
-    where_clause = "items.id IN (%s)" % ",".join(str(val) for val in item_ids)
-    query = "SELECT items.id, width, height FROM items" \
-            " JOIN sizes ON items.id=sizes.id " \
+    where_clause = "id IN (%s)" % ",".join(str(val) for val in item_ids)
+    query = "SELECT id, width, height FROM sizes" \
             " WHERE %s" \
             " LIMIT 150" % where_clause
 
