@@ -48,7 +48,7 @@ def query_reposts(database, item_ids):
 def items(db):
     with stats.timer(metric_name("request.items")):
         start_time = time.time()
-        item_ids = [int(val) for val in bottle.request.params.get("ids", []).split(",") if val][:150]
+        item_ids = tuple(int(val) for val in bottle.request.params.get("ids", []).split(",") if val)[:150]
 
         result = attrdict()
         result.sizes = query_sizes(db, item_ids)
