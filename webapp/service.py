@@ -13,7 +13,7 @@ stats = datadog.ThreadStats()
 stats.start()
 
 print("open database at pr0gramm-meta.sqlite3")
-bottle.install(sqlite.Plugin(dbfile="pr0gramm-meta.sqlite3"))
+bottle.install(sqlite.Plugin(dbfile="pr0gramm-meta.sqlite3", dictrows=False))
 
 
 def metric_name(suffix):
