@@ -33,7 +33,6 @@ def query_sizes(database, item_ids):
         for item_id, width, height in database.execute(query).fetchall()
     ]
 
-@lru_cache(128)
 def query_reposts(database, item_ids):
     where_clause = "item_id IN (%s)" % ",".join(str(val) for val in item_ids)
     query = "SELECT item_id FROM tags " \
