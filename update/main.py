@@ -1,30 +1,31 @@
-import pathlib
+#!/usr/bin/env python3
 
-import gevent.monkey
-
-gevent.monkey.patch_all()
-
+import sys
+import argparse
+import psycopg2
 import subprocess
 import re
 import sqlite3
 import itertools
 import time
-import gevent
-import gevent.queue
 from collections import namedtuple
 from attrdict import AttrDict as attrdict
 from PIL import Image
 import logbook
 import requests
 import datadog
-import json as _json
+import threading
+import queue
+from collections import deque
+# noinspection PyUnresolvedReferences
+import signal
 
 logger = logbook.Logger("pr0gramm-meta")
 
 logger.info("initialize datadog metrics")
 datadog.initialize()
 stats = datadog.ThreadStats()
-stats.start(flush_in_greenlet=True)
+stats.start()
 
 Item = namedtuple("Item", ["id", "promoted", "up", "down",
                            "created", "image", "thumb", "fullsize", "source", "flags",
@@ -39,30 +40,42 @@ def metric_name(suffix):
     return "pr0gramm.meta.update." + suffix
 
 
-class UserNameQueue(object):
-    def __init__(self):
-        self.queue = gevent.queue.Queue()
-        self.names = set()
+class SetQueue(queue.Queue):
+    """This queue only contains unique values"""
 
-    def put(self, name):
-        if name.lower() not in self.names and len(self.names) < 150000:
-            self.names.add(name.lower())
-            self.queue.put(name)
+    def __init__(self, maxsize=0, key=lambda x: x):
+        super().__init__(maxsize)
+        self.keyfunc = key
 
-    def get(self):
-        stats.gauge(metric_name("queue.users"), self.queue.qsize())
+    # Initialize the queue representation
+    def _init(self, maxsize):
+        self.keys = set()
+        self.queue = deque()
 
-        name = self.queue.get()
-        self.names.discard(name.lower())
-        return name
+    def _qsize(self):
+        assert len(self.queue) == len(self.keys), "length of queue and keys not equal"
+        return len(self.queue)
+
+    # Put a new item in the queue
+    def _put(self, item):
+        key = self.keyfunc(item)
+        if key not in self.keys:
+            self.keys.add(key)
+            self.queue.append(item)
+
+    # Get an item from the queue
+    def _get(self):
+        item = self.queue.popleft()
+        self.keys.remove(self.keyfunc(item))
+        return item
 
 
 # just put a user in this queue to download its details
-user_queue = UserNameQueue()
+user_queue = SetQueue(key=lambda item: item.lower())
 
 
 def iterate_posts(start=None):
-    base_url = "http://pr0gramm.com/api/items/get?flags=7"
+    base_url = "http://pr0gramm.com/api/items/get%sflags=7"
     while True:
         url = base_url + "&older=%d" % start if start else base_url
 
@@ -102,11 +115,14 @@ def get_user_details(name):
     return User(user.id, user.name, user.registered, user.score)
 
 
-def store_user_details(db, details):
-    with db:
-        db.execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?)", details)
-        db.execute("INSERT OR REPLACE INTO user_score VALUES (?, ?, ?)",
-                   [details.id, int(time.time()), details.score])
+def store_user_details(database, details):
+    with database, database.cursor() as cursor:
+        cursor.execute("INSERT INTO users VALUES (%s, %s, %s, %s)"
+                       " ON CONFLICT(id) DO UPDATE SET score=%s",
+                       list(details) + [details.score])
+
+        cursor.execute("INSERT INTO user_score VALUES (%s, %s, %s)",
+                       [details.id, int(time.time()), details.score])
 
 
 def update_user_details(db):
@@ -115,7 +131,7 @@ def update_user_details(db):
         try:
             # noinspection PyTypeChecker
             store_user_details(db, get_user_details(user))
-            gevent.sleep(1)
+            time.sleep(1)
         except IOError:
             pass
 
@@ -174,8 +190,11 @@ def get_item_size(item):
 
 def get_item_ids_in_table(db, items, table):
     ids = ",".join(str(item.id) for item in items)
-    query = ";SELECT id FROM %s WHERE id IN (%s)" % (table, ids)
-    return {item_id for item_id, in db.execute(query)}
+    query = "SELECT id FROM %s WHERE id IN (%s)" % (table, ids)
+
+    with db, db.cursor() as cursor:
+        cursor.execute(query)
+        return {item_id for item_id, in cursor}
 
 
 def get_items_not_in_table(db, items, table):
@@ -204,8 +223,9 @@ def update_item_sizes(database, items):
             logger.exception()
             continue
 
-        with database:
-            database.execute("INSERT OR REPLACE INTO sizes VALUES (?, ?, ?)", (item.id, width, height))
+        with database, database.cursor() as cursor:
+            cursor.execute("INSERT INTO sizes VALUES (%s, %s, %s)"
+                           " ON CONFLICT(id) DO NOTHING", (item.id, width, height))
 
 
 def iter_item_tags(item):
@@ -242,9 +262,12 @@ def update_item_infos(database, items):
             continue
 
         if tags:
-            with database:
-                stmt = "INSERT OR REPLACE INTO tags (id, item_id, confidence, tag) VALUES (?,?,?,?)"
-                database.executemany(stmt, tags)
+            tags = [list(tag) + [tag.confidence] for tag in tags]
+            stmt = "INSERT INTO tags (id, item_id, confidence, tag) VALUES (%s,%s,%s,%s)" \
+                   " ON CONFLICT(id) DO UPDATE SET confidence=%s"
+
+            with database, database.cursor() as cursor:
+                cursor.executemany(stmt, tags)
 
 
 @stats.timed(metric_name("db.store"))
@@ -255,69 +278,37 @@ def store_items(database, items):
     :param sqlite3.Connection database: A database connection to use for storing the items.
     :param tuple[items] items: The items to process
     """
-    with database:
-        stmt = "INSERT OR REPLACE INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
-        database.executemany(stmt, items)
+    items = [list(item) + [item.up, item.down, item.mark] for item in items]
+    stmt = "INSERT INTO items VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)" \
+           " ON CONFLICT(id) DO UPDATE SET up=%s, down=%s, mark=%s"
 
-
-def create_database_tables(db):
-    db.execute("""CREATE TABLE IF NOT EXISTS items (
-      id INT PRIMARY KEY,
-      promoted INT, up INT, down INT, created INT,
-      image TEXT, thumb TEXT, fullsize TEXT, source TEXT, flags INT, user TEXT, mark INT
-    )""")
-
-    db.execute("CREATE TABLE IF NOT EXISTS sizes (id INT PRIMARY KEY, width INT, height INT)")
-    db.execute("""CREATE TABLE IF NOT EXISTS tags (
-      id INT PRIMARY KEY,
-      item_id INT,
-      confidence REAL,
-      tag TEXT,
-      FOREIGN KEY (item_id) REFERENCES items(id)
-    )""")
-
-    db.execute("""CREATE TABLE IF NOT EXISTS users (
-      id INT PRIMARY KEY,
-      name TEXT,
-      registered INT,
-      score INT)
-    """)
-
-    db.execute("""CREATE TABLE IF NOT EXISTS user_score (
-      user_id INT,
-      timestamp INT,
-      score INT,
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    )""")
-
-    db.execute("CREATE INDEX IF NOT EXISTS tags_item_id ON tags(item_id)")
-    db.execute("CREATE INDEX IF NOT EXISTS users_name ON users(name COLLATE NOCASE)")
-    db.execute("CREATE INDEX IF NOT EXISTS user_score__user_id__timestamp ON user_score(user_id, timestamp)")
+    with database, database.cursor() as cursor:
+        cursor.executemany(stmt, items)
 
 
 def schedule(interval, name, func, *args, **kwargs):
-    def worker():
-        while True:
-            start = time.time()
+    while True:
+        start = time.time()
 
-            # noinspection PyBroadException
-            try:
-                logger.info("Calling scheduled function {} now", name)
-                func(*args, **kwargs)
+        # noinspection PyBroadException
+        try:
+            logger.info("Calling scheduled function {} now", name)
+            func(*args, **kwargs)
 
-                duration = time.time() - start
-                logger.info("{} took {:1.2f}s to complete", name, duration)
+            duration = time.time() - start
+            logger.info("{} took {:1.2f}s to complete", name, duration)
 
-            except KeyboardInterrupt:
-                raise
+        except KeyboardInterrupt:
+            sys.exit(1)
 
-            except:
-                duration = time.time() - start
-                logger.exception("Ignoring error in scheduled function {} after {}", name, duration)
+        except:
+            duration = time.time() - start
+            logger.exception("Ignoring error in scheduled function {} after {}", name, duration)
 
-            gevent.sleep(interval)
-
-    return gevent.spawn(worker)
+        try:
+            time.sleep(interval)
+        except KeyboardInterrupt:
+            sys.exit(1)
 
 
 def run(db, *functions):
@@ -340,30 +331,47 @@ def run(db, *functions):
             break
 
 
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--postgres", type=str, required=True, help="Postgres host")
+    return parser.parse_args()
+
+
+def start(db):
+    def start_in_thread(func, *args):
+        thread = threading.Thread(target=func, args=args)
+        thread.daemon = True
+        thread.start()
+        return thread
+
+    yield start_in_thread(schedule, 1, "pr0gramm.meta.update.users", update_user_details, db)
+
+    yield start_in_thread(schedule, 60, "pr0gramm.meta.update.sizes",
+                          run, db, (0, 0.5, update_item_sizes), (0, 0.5, update_item_infos))
+
+    yield start_in_thread(schedule, 600, "pr0gramm.meta.update.infos.new",
+                          run, db, (0, 6, update_item_infos))
+
+    yield start_in_thread(schedule, 3600, "pr0gramm.meta.update.infos.more",
+                          run, db, (5, 48, update_item_infos))
+
+    yield start_in_thread(schedule, 24 * 3600, "pr0gramm.meta.update.infos.week",
+                          run, db, (47, 24 * 7, update_item_infos))
+
+
 def main():
-    logger.info("opening database")
-    db = sqlite3.connect("pr0gramm-meta.sqlite3")
-    create_database_tables(db)
+    args = parse_arguments()
 
-    def start():
-        yield schedule(1, "pr0gramm.meta.update.users", update_user_details, db)
-
-        yield schedule(60, "pr0gramm.meta.update.sizes",
-                       run, db, (0, 0.5, update_item_sizes), (0, 0.5, update_item_infos))
-
-        yield schedule(600, "pr0gramm.meta.update.infos.new",
-                       run, db, (0, 6, update_item_infos))
-
-        yield schedule(3600, "pr0gramm.meta.update.infos.more",
-                       run, db, (5, 48, update_item_infos))
-
-        yield schedule(24 * 3600, "pr0gramm.meta.update.infos.day",
-                       run, db, (47, 24 * 7, update_item_infos))
+    logger.info("opening database at {}", args.postgres)
+    db = psycopg2.connect(host=args.postgres, user="postgres", password="password", dbname="postgres")
 
     try:
-        gevent.joinall(tuple(start()))
+        threads = tuple(start(db))
+        for thread in threads:
+            thread.join()
+
     except KeyboardInterrupt:
-        pass
+        sys.exit(1)
 
 
 if __name__ == '__main__':
