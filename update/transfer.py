@@ -31,7 +31,7 @@ def main():
     parser.add_argument("--source", default="pr0gramm-meta.sqlite3")
     args = parser.parse_args()
 
-    source = sqlite3.connect("pr0gramm-meta.sqlite3")
+    source = sqlite3.connect(args.source)
     source.text_factory = str
     target = psycopg2.connect(host=args.pg_host, user="postgres", password="password", dbname="postgres")
 
