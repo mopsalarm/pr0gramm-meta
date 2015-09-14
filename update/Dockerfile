@@ -8,9 +8,8 @@ RUN curl http://johnvansickle.com/ffmpeg/releases/ffmpeg-release-64bit-static.ta
     && rm /usr/bin/ffmpeg \
     && rm /usr/bin/ffmpeg-10bit
 
-RUN apk del git tar xz
+RUN apk del tar xz
 
 RUN mkdir -p /data
 
-WORKDIR /data
 CMD /env/bin/python /app/main.py
