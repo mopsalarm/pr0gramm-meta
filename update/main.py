@@ -1,4 +1,5 @@
 import pathlib
+
 import gevent.monkey
 
 gevent.monkey.patch_all()
@@ -10,16 +11,13 @@ import itertools
 import time
 import gevent
 import gevent.queue
-
 from collections import namedtuple
 from attrdict import AttrDict as attrdict
-
 from PIL import Image
 import logbook
 import requests
 import datadog
 import broke
-
 import json as _json
 
 logger = logbook.Logger("pr0gramm-meta")
@@ -28,8 +26,6 @@ logger.info("initialize datadog metrics")
 datadog.initialize()
 stats = datadog.ThreadStats()
 stats.start(flush_in_greenlet=True)
-
-
 
 Item = namedtuple("Item", ["id", "promoted", "up", "down",
                            "created", "image", "thumb", "fullsize", "source", "flags",
@@ -42,6 +38,7 @@ User = namedtuple("User", ["id", "name", "registered", "score"])
 # ensure that the file exists
 pathlib.Path("pr0gramm.broke").touch()
 broker = broke.BrokeWriter("pr0gramm.broke")
+
 
 def metric_name(suffix):
     return "pr0gramm.meta.update." + suffix
@@ -63,6 +60,7 @@ class UserNameQueue(object):
         name = self.queue.get()
         self.names.discard(name.lower())
         return name
+
 
 # just put a user in this queue to download its details
 user_queue = UserNameQueue()
@@ -274,6 +272,7 @@ def store_items(database, items):
     with database:
         stmt = "INSERT OR REPLACE INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
         database.executemany(stmt, items)
+
 
 @stats.timed(metric_name("broker.commit"))
 def broker_commit():

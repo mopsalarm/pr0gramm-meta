@@ -2,4 +2,5 @@ datadog==0.6.0
 bottle==0.12.8
 attrdict==2.0.0
 CherryPy==3.8.0
-bottle-sqlite==0.1.2
+Logbook==0.9.1
+psycopg2==2.6.1
