@@ -1,1 +1,1 @@
-apk-install xz tar postgresql-dev
+apk-install curl xz tar postgresql-dev

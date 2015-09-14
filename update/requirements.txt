@@ -3,7 +3,5 @@ Pillow==2.8.1
 argparse==1.2.1
 requests==2.7.0
 datadog==0.6.0
-gevent==1.1a2
-greenlet==0.4.7
 attrdict==2.0.0
 psycopg2==2.6.1

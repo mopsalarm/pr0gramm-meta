@@ -8,8 +8,6 @@ RUN curl http://johnvansickle.com/ffmpeg/releases/ffmpeg-release-64bit-static.ta
     && rm /usr/bin/ffmpeg \
     && rm /usr/bin/ffmpeg-10bit
 
-RUN apk del tar xz
+RUN apk del tar xz curl
 
-RUN mkdir -p /data
-
-CMD /env/bin/python /app/main.py
+ENTRYPOINT ["/env/bin/python", "/app/main.py"]
