@@ -17,7 +17,6 @@ from PIL import Image
 import logbook
 import requests
 import datadog
-import broke
 import json as _json
 
 logger = logbook.Logger("pr0gramm-meta")
@@ -34,10 +33,6 @@ Item = namedtuple("Item", ["id", "promoted", "up", "down",
 Tag = namedtuple("Tag", ["id", "item_id", "confidence", "tag"])
 
 User = namedtuple("User", ["id", "name", "registered", "score"])
-
-# ensure that the file exists
-pathlib.Path("pr0gramm.broke").touch()
-broker = broke.BrokeWriter("pr0gramm.broke")
 
 
 def metric_name(suffix):
@@ -77,9 +72,6 @@ def iterate_posts(start=None):
             response.raise_for_status()
             json = response.json()
 
-        # dump back to broker
-        broker.store("api.items.get", _json.dumps(json).encode("utf8"))
-
         for item in json["items"]:
             item = Item(**item)
             start = min(start or item.id, item.id)
@@ -105,9 +97,6 @@ def get_user_details(name):
     response = requests.get(url, params={"name": name, "flags": "1"})
     content = response.json()
     user = attrdict(content).user
-
-    # dump back to broker
-    broker.store("api.profile.info", _json.dumps(content).encode("utf8"))
 
     # convert to named tuple
     return User(user.id, user.name, user.registered, user.score)
@@ -227,9 +216,6 @@ def iter_item_tags(item):
     response.raise_for_status()
     info = response.json()
 
-    # dump back to broker
-    broker.store("api.items.info", _json.dumps(info).encode("utf8"))
-
     # enqueue the commenters names
     for comment in info.get("comments", []):
         user_queue.put(comment["name"])
@@ -272,15 +258,6 @@ def store_items(database, items):
     with database:
         stmt = "INSERT OR REPLACE INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
         database.executemany(stmt, items)
-
-
-@stats.timed(metric_name("broker.commit"))
-def broker_commit():
-    if broker.dirty:
-        logger.info("Committing broker to filesystem now")
-        broker.commit()
-    else:
-        logger.info("Broker is empty, nothing to commit")
 
 
 def create_database_tables(db):
@@ -383,13 +360,10 @@ def main():
         yield schedule(24 * 3600, "pr0gramm.meta.update.infos.day",
                        run, db, (47, 24 * 7, update_item_infos))
 
-        gevent.sleep(15)
-        yield schedule(300, "app.broke.commit", broker_commit)
-
     try:
         gevent.joinall(tuple(start()))
     except KeyboardInterrupt:
-        broker_commit()
+        pass
 
 
 if __name__ == '__main__':
