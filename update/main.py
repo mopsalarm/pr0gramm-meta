@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 
-import sys
 import argparse
-import psycopg2
-import subprocess
+from collections import deque
+from collections import namedtuple
+import itertools
+import queue
 import re
 import sqlite3
-import itertools
-import time
-from collections import namedtuple
-from attrdict import AttrDict as attrdict
-from PIL import Image
-import logbook
-import requests
-import datadog
+import subprocess
+import sys
 import threading
-import queue
-from collections import deque
+import time
+
+from PIL import Image
+from attrdict import AttrDict as attrdict
+import datadog
+import logbook
+import psycopg2
+import requests
 # noinspection PyUnresolvedReferences
 import signal
 
@@ -70,8 +71,22 @@ class SetQueue(queue.Queue):
         return item
 
 
+class UserSetQueue(SetQueue):
+    def __init__(self):
+        super().__init__(key=str.lower)
+
+    def _put(self, item):
+        stats.gauge(metric_name("queue.users"), len(self.keys), sample_rate=0.01)
+        super()._put(item)
+
+    def _get(self):
+        print(len(self.keys))
+        stats.gauge(metric_name("queue.users"), len(self.keys), sample_rate=0.01)
+        return super()._get()
+
+
 # just put a user in this queue to download its details
-user_queue = SetQueue(key=lambda item: item.lower())
+user_queue = UserSetQueue()
 
 
 def iterate_posts(start=None):
@@ -339,8 +354,7 @@ def parse_arguments():
 
 def start(db):
     def start_in_thread(func, *args):
-        thread = threading.Thread(target=func, args=args)
-        thread.daemon = True
+        thread = threading.Thread(target=func, args=args, daemon=True)
         thread.start()
         return thread
 
