@@ -61,14 +61,21 @@ CREATE INDEX IF NOT EXISTS items__username ON items(lower(username));
 CREATE OR REPLACE FUNCTION pr0_update_item_score()
   RETURNS TRIGGER AS $pr0_update_item_score$
 BEGIN
+  -- update score
   IF NEW.up - NEW.down >= 500
   THEN
     INSERT INTO items_bestof (id, score)
     VALUES (NEW.id, NEW.up - NEW.down) ON CONFLICT(id) DO UPDATE SET score=NEW.up-NEW.down;
   ELSE
-    DELETE FROM items_bestof
-    WHERE id = NEW.id;
+    DELETE FROM items_bestof WHERE id = NEW.id;
   END IF;
+
+  -- update controversial table.
+  IF NEW.up>60 AND NEW.down>60 AND least(NEW.up, NEW.down)::float/greatest(NEW.up, NEW.down)>=0.7
+  THEN
+    INSERT INTO controversial (item_id) VALUES (NEW.id) ON CONFLICT(item_id) DO NOTHING;
+  END IF;
+
   RETURN NULL;
 END;
 $pr0_update_item_score$ LANGUAGE plpgsql;
@@ -78,5 +85,6 @@ DROP TRIGGER IF EXISTS items__update_score ON items;
 CREATE TRIGGER items__update_score AFTER INSERT OR UPDATE OF up, down ON items
 FOR EACH ROW EXECUTE PROCEDURE pr0_update_item_score();
 
-COMMIT;
 END;
+
+
