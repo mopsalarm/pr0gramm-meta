@@ -90,7 +90,7 @@ user_queue = UserSetQueue()
 
 
 def iterate_posts(start=None):
-    base_url = "http://pr0gramm.com/api/items/get%sflags=7"
+    base_url = "http://pr0gramm.com/api/items/get?flags=7"
     while True:
         url = base_url + "&older=%d" % start if start else base_url
 
