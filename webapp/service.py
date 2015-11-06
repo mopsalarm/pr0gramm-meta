@@ -24,9 +24,10 @@ def metric_name(suffix):
 
 
 def execute(query, *args):
-    cursor = database.cursor()
-    cursor.execute(query, *args)
-    return cursor.fetchall()
+    with database, database.cursor():
+        cursor = database.cursor()
+        cursor.execute(query, *args)
+        return cursor.fetchall()
 
 def query_sizes(item_ids):
     where_clause = "id IN (%s)" % ",".join(str(val) for val in item_ids)
