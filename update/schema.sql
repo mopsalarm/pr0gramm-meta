@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS items_bestof (
 
 CREATE INDEX IF NOT EXISTS tags__item_id ON tags(item_id);
 CREATE INDEX IF NOT EXISTS tags__tag ON tags(lower("tag"));
+CREATE INDEX IF NOT EXISTS tags__tag_full ON tags USING GIN (to_tsvector('simple', tags.tag));
 CREATE INDEX IF NOT EXISTS users__name ON users(lower("name"));
 CREATE INDEX IF NOT EXISTS user_score__user_id__timestamp ON user_score(user_id, "timestamp");
 CREATE INDEX IF NOT EXISTS items_bestof__score ON items_bestof(score);
