@@ -1,4 +1,4 @@
-FROM gliderlabs/python-runtime:3.5
+FROM gliderlabs/python-runtime:3.4
 MAINTAINER Mopsalarm
 
 RUN curl http://johnvansickle.com/ffmpeg/releases/ffmpeg-release-64bit-static.tar.xz \
