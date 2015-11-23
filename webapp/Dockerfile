@@ -1,4 +1,4 @@
-FROM gliderlabs/python-runtime:3.4
+FROM gliderlabs/python-runtime:3.5
 MAINTAINER Mopsalarm
 
 EXPOSE 8080

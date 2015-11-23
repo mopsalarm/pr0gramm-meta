@@ -52,12 +52,15 @@ CREATE TABLE IF NOT EXISTS items_bestof (
 );
 
 CREATE INDEX IF NOT EXISTS tags__item_id ON tags(item_id);
-CREATE INDEX IF NOT EXISTS tags__tag ON tags(lower("tag"));
+CREATE INDEX IF NOT EXISTS tags__tag_repost ON tags(lower("tag")) where lower("tag")='repost';
 CREATE INDEX IF NOT EXISTS tags__tag_full ON tags USING GIN (to_tsvector('simple', tags.tag));
 CREATE INDEX IF NOT EXISTS users__name ON users(lower("name"));
 CREATE INDEX IF NOT EXISTS user_score__user_id__timestamp ON user_score(user_id, "timestamp");
 CREATE INDEX IF NOT EXISTS items_bestof__score ON items_bestof(score);
-CREATE INDEX IF NOT EXISTS items__username ON items(lower(username));
+
+-- not used right now
+-- CREATE INDEX IF NOT EXISTS items__username ON items(lower(username));
+-- CREATE INDEX IF NOT EXISTS tags__tag ON tags(lower("tag"));
 
 -- The update function that modifies the items in the items_bestof table.
 CREATE OR REPLACE FUNCTION pr0_update_item_score()
@@ -88,5 +91,3 @@ CREATE TRIGGER items__update_score AFTER INSERT OR UPDATE OF up, down ON items
 FOR EACH ROW EXECUTE PROCEDURE pr0_update_item_score();
 
 END;
-
-
