@@ -1,14 +1,12 @@
 import time
 import os
-
 import bottle
 import datadog
-
 from attrdict import AttrDict as attrdict
+from first import first
 import psycopg2
 
 CONFIG_POSTGRES_HOST = os.environ["POSTGRES_HOST"]
-
 
 print("initialize datadog metrics")
 datadog.initialize()
@@ -29,6 +27,7 @@ def execute(query, *args):
         cursor.execute(query, *args)
         return cursor.fetchall()
 
+
 def query_sizes(item_ids):
     where_clause = "id IN (%s)" % ",".join(str(val) for val in item_ids)
     query = "SELECT id, width, height FROM sizes WHERE %s LIMIT 150" % where_clause
@@ -36,7 +35,7 @@ def query_sizes(item_ids):
     return [
         dict(id=item_id, width=width, height=height)
         for item_id, width, height in execute(query)
-    ]
+        ]
 
 
 def query_reposts(item_ids):
@@ -71,3 +70,14 @@ def user_benis(user):
 
         start_time = int(time.time() - 3600 * 24 * 7)
         return {"benisHistory": execute(query, [user, start_time])}
+
+
+@bottle.get("/user/suggest/<prefix>")
+def user_suggest(prefix):
+    prefix = prefix.strip().replace("%", "")
+    if len(prefix) < 3:
+        return bottle.abort(412, "Need at least 3 chars")
+
+    with stats.timer(metric_name("request.user-suggest")):
+        query = "SELECT name FROM users WHERE lower(name) LIKE lower(%s) ORDER BY score DESC LIMIT 20"
+        return {"names": [first(row) for row in execute(query, [prefix.replace("%", "") + "%"])]}
