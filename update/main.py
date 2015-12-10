@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-from collections import deque
-from collections import namedtuple
 import itertools
 import queue
 import re
@@ -11,13 +9,16 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
+from collections import namedtuple
 
-from PIL import Image
-from attrdict import AttrDict as attrdict
 import datadog
 import logbook
-import psycopg2
+import pcc
 import requests
+from PIL import Image
+from attrdict import AttrDict as attrdict
+
 # noinspection PyUnresolvedReferences
 import signal
 
@@ -80,7 +81,6 @@ class UserSetQueue(SetQueue):
         super()._put(item)
 
     def _get(self):
-        print(len(self.keys))
         stats.gauge(metric_name("queue.users"), len(self.keys), sample_rate=0.01)
         return super()._get()
 
@@ -140,12 +140,14 @@ def store_user_details(database, details):
                        [details.id, int(time.time()), details.score])
 
 
-def update_user_details(db):
+def update_user_details(dbpool):
     while True:
         user = user_queue.get()
         try:
             # noinspection PyTypeChecker
-            store_user_details(db, get_user_details(user))
+            with dbpool.active() as database:
+                store_user_details(database, get_user_details(user))
+
             time.sleep(1)
         except IOError:
             pass
@@ -172,7 +174,7 @@ def get_video_size(video_url, size=16 * 1024):
 
     # ask avprobe for the size of the image
     process = subprocess.Popen(
-        ["ffprobe", "-"], shell=False, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            ["ffprobe", "-"], shell=False, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     stdout, stderr = process.communicate(response.content)
 
@@ -290,7 +292,6 @@ def store_items(database, items):
     """
     Stores the given items in the database. They will replace any previously stored items.
 
-    :param sqlite3.Connection database: A database connection to use for storing the items.
     :param tuple[items] items: The items to process
     """
     items = [list(item) + [item.up, item.down, item.mark] for item in items]
@@ -326,7 +327,7 @@ def schedule(interval, name, func, *args, **kwargs):
             sys.exit(1)
 
 
-def run(db, *functions):
+def run(dbpool, *functions):
     for items in chunker(16, iterate_posts()):
         stop = True
         age = (time.time() - items[0].created) / 3600
@@ -338,8 +339,10 @@ def run(db, *functions):
             if age > max_age:
                 continue
 
-            store_items(db, items)
-            function(db, items)
+            with dbpool.active() as database:
+                store_items(database, items)
+                function(database, items)
+
             stop = False
 
         if stop:
@@ -352,35 +355,37 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def start(db):
+def start(dbpool):
     def start_in_thread(func, *args):
         thread = threading.Thread(target=func, args=args, daemon=True)
         thread.start()
         return thread
 
-    yield start_in_thread(schedule, 1, "pr0gramm.meta.update.users", update_user_details, db)
+    yield start_in_thread(schedule, 1, "pr0gramm.meta.update.users", update_user_details, dbpool)
 
     yield start_in_thread(schedule, 60, "pr0gramm.meta.update.sizes",
-                          run, db, (0, 0.5, update_item_sizes), (0, 0.5, update_item_infos))
+                          run, dbpool, (0, 0.5, update_item_sizes), (0, 0.5, update_item_infos))
 
     yield start_in_thread(schedule, 600, "pr0gramm.meta.update.infos.new",
-                          run, db, (0, 6, update_item_infos))
+                          run, dbpool, (0, 6, update_item_infos))
 
     yield start_in_thread(schedule, 3600, "pr0gramm.meta.update.infos.more",
-                          run, db, (5, 48, update_item_infos))
+                          run, dbpool, (5, 48, update_item_infos))
 
     yield start_in_thread(schedule, 24 * 3600, "pr0gramm.meta.update.infos.week",
-                          run, db, (47, 24 * 7, update_item_infos))
+                          run, dbpool, (47, 24 * 7, update_item_infos))
 
 
 def main():
     args = parse_arguments()
 
     logger.info("opening database at {}", args.postgres)
-    db = psycopg2.connect(host=args.postgres, user="postgres", password="password", dbname="postgres")
+    pool = pcc.RefreshingConnectionCache(
+            lifetime=600,
+            host=args.postgres, user="postgres", password="password", dbname="postgres")
 
     try:
-        threads = tuple(start(db))
+        threads = tuple(start(pool))
         for thread in threads:
             thread.join()
 
