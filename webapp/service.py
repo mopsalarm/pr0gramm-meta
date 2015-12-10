@@ -1,10 +1,11 @@
-import time
 import os
+import time
+
 import bottle
 import datadog
-from attrdict import AttrDict as attrdict
 from first import first
-import psycopg2
+from attrdict import AttrDict as attrdict
+from pcc import RefreshingConnectionCache
 
 CONFIG_POSTGRES_HOST = os.environ["POSTGRES_HOST"]
 
@@ -14,7 +15,10 @@ stats = datadog.ThreadStats()
 stats.start()
 
 print("open database at", CONFIG_POSTGRES_HOST)
-database = psycopg2.connect(host=CONFIG_POSTGRES_HOST, user="postgres", password="password", dbname="postgres")
+
+pool = RefreshingConnectionCache(
+        lifetime=600,
+        host=CONFIG_POSTGRES_HOST, user="postgres", password="password", dbname="postgres")
 
 
 def metric_name(suffix):
@@ -22,7 +26,7 @@ def metric_name(suffix):
 
 
 def execute(query, *args):
-    with database, database.cursor():
+    with pool.tx() as database, database.cursor():
         cursor = database.cursor()
         cursor.execute(query, *args)
         return cursor.fetchall()

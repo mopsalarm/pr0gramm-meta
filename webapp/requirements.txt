@@ -4,4 +4,5 @@ attrdict==2.0.0
 CherryPy==3.8.0
 Logbook==0.9.1
 psycopg2==2.6.1
-first
+first==2.0.1
+git+https://github.com/mopsalarm/postgres-connection-cache.git
