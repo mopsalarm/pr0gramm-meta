@@ -5,4 +5,4 @@ CherryPy==3.8.0
 Logbook==0.9.1
 psycopg2==2.6.1
 first==2.0.1
-git+https://github.com/mopsalarm/postgres-connection-cache.git
+https://github.com/mopsalarm/postgres-connection-cache/archive/master.tar.gz
