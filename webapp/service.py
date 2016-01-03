@@ -3,9 +3,10 @@ import time
 
 import bottle
 import datadog
-from first import first
 from attrdict import AttrDict as attrdict
+from first import first
 from pcc import RefreshingConnectionCache
+from psycopg2.extras import DictCursor
 
 CONFIG_POSTGRES_HOST = os.environ["POSTGRES_HOST"]
 
@@ -18,7 +19,8 @@ print("open database at", CONFIG_POSTGRES_HOST)
 
 pool = RefreshingConnectionCache(
         lifetime=600,
-        host=CONFIG_POSTGRES_HOST, user="postgres", password="password", dbname="postgres")
+        host=CONFIG_POSTGRES_HOST, user="postgres", password="password", dbname="postgres",
+        cursor_factory=DictCursor)
 
 
 def metric_name(suffix):
@@ -38,8 +40,7 @@ def query_sizes(item_ids):
 
     return [
         dict(id=item_id, width=width, height=height)
-        for item_id, width, height in execute(query)
-        ]
+        for item_id, width, height in execute(query)]
 
 
 def query_reposts(item_ids):
@@ -49,6 +50,12 @@ def query_reposts(item_ids):
             " LIMIT 150" % where_clause
 
     return [item_id for item_id, in execute(query)]
+
+
+def query_previews(item_ids):
+    where_clause = "id IN (%s)" % ",".join(str(val) for val in item_ids)
+    query = "SELECT id, width, height, encode(preview, 'base64') FROM item_previews WHERE %s" % where_clause
+    return [dict(row) for row in execute(query)]
 
 
 @bottle.get("/items")
@@ -62,6 +69,10 @@ def items():
         result.sizes = query_sizes(item_ids)
         result.reposts = query_reposts(item_ids)
         result.duration = time.time() - start_time
+
+        if bottle.request.params.get("previews") == "true":
+            result.previews = query_previews(item_ids)
+
         return result
 
 

@@ -21,6 +21,13 @@ CREATE TABLE IF NOT EXISTS sizes (
   height INT             NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS item_previews (
+  id      INT PRIMARY KEY NOT NULL REFERENCES items (id),
+  width   INT             NOT NULL,
+  height  INT             NOT NULL,
+  preview BYTEA           NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tags (
   id         INT PRIMARY KEY NOT NULL,
   item_id    INT             NOT NULL REFERENCES items (id),

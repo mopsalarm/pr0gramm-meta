@@ -4,13 +4,13 @@ import argparse
 import itertools
 import queue
 import re
-import sqlite3
 import subprocess
 import sys
 import threading
 import time
 from collections import deque
 from collections import namedtuple
+from io import BytesIO
 
 import datadog
 import logbook
@@ -174,7 +174,7 @@ def get_video_size(video_url, size=16 * 1024):
 
     # ask avprobe for the size of the image
     process = subprocess.Popen(
-            ["ffprobe", "-"], shell=False, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            ["timeout", "ffprobe", "-"], shell=False, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     stdout, stderr = process.communicate(response.content)
 
@@ -224,7 +224,7 @@ def update_item_sizes(database, items):
     """
     Downloads sizes for a list of items.
 
-    :param sqlite3.Connection database: A database connection to use for storing the items.
+    :param database: A database connection to use for storing the items.
     :param tuple[items] items: The items to process
     """
     # get the items that need updates
@@ -243,6 +243,45 @@ def update_item_sizes(database, items):
         with database, database.cursor() as cursor:
             cursor.execute("INSERT INTO sizes VALUES (%s, %s, %s)"
                            " ON CONFLICT(id) DO NOTHING", (item.id, width, height))
+
+
+def update_item_previews(database, items):
+    # get the items that need updates
+    for item in get_items_not_in_table(database, items, "item_previews"):
+        # noinspection PyBroadException
+        try:
+            filename = item.image.lower()
+            url = "http://img.pr0gramm.com/" + item.image
+            logger.debug("Update preview for {}", url)
+
+            # generate thumbnail
+            png_bytes = subprocess.check_output([
+                "timeout",
+                "ffmpeg", "-loglevel", "panic", "-y", "-i", url,
+                "-vf", "scale=8:-1", "-frames", "1",
+                "-f", "image2", "-vcodec", "png", "-"])
+
+            image = Image.open(BytesIO(png_bytes)).convert("RGB")
+            width, height = image.size
+
+            preview = bytearray()
+            for r, g, b in image.getdata():
+                # rrrrrggg gggbbbbb
+                first = (r & 0xf8) | (g >> 5)
+                second = ((g >> 2) & 0x7) | (b >> 3)
+                preview.append(first)
+                preview.append(second)
+
+            with database, database.cursor() as cursor:
+                cursor.execute("INSERT INTO item_previews VALUES (%s, %s, %s, %s) ON CONFLICT(id) DO NOTHING",
+                               (item.id, width, height, preview))
+
+        except KeyboardInterrupt:
+            raise
+
+        except:
+            logger.exception()
+            continue
 
 
 def iter_item_tags(item):
@@ -364,7 +403,10 @@ def start(dbpool):
     yield start_in_thread(schedule, 1, "pr0gramm.meta.update.users", update_user_details, dbpool)
 
     yield start_in_thread(schedule, 60, "pr0gramm.meta.update.sizes",
-                          run, dbpool, (0, 0.5, update_item_sizes), (0, 0.5, update_item_infos))
+                          run, dbpool,
+                          (0, 0.5, update_item_previews),
+                          (0, 0.5, update_item_sizes),
+                          (0, 0.5, update_item_infos))
 
     yield start_in_thread(schedule, 600, "pr0gramm.meta.update.infos.new",
                           run, dbpool, (0, 6, update_item_infos))
