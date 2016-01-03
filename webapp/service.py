@@ -54,7 +54,7 @@ def query_reposts(item_ids):
 
 def query_previews(item_ids):
     where_clause = "id IN (%s)" % ",".join(str(val) for val in item_ids)
-    query = "SELECT id, width, height, encode(preview, 'base64') FROM item_previews WHERE %s" % where_clause
+    query = "SELECT id, width, height, encode(preview, 'base64') as pixels FROM item_previews WHERE %s" % where_clause
     return [dict(row) for row in execute(query)]
 
 
