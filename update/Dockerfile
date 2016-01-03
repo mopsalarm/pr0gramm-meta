@@ -1,12 +1,6 @@
-FROM gliderlabs/python-runtime:3.4
+FROM mopsalarm/python-base:3.5
 MAINTAINER Mopsalarm
 
-RUN curl http://johnvansickle.com/ffmpeg/releases/ffmpeg-release-64bit-static.tar.xz \
-    | xz -d \
-    | tar xC /usr/bin --strip-components=1 \
-    && rm /usr/bin/ffserver \
-    && rm /usr/bin/ffmpeg-10bit
+# the onbuild.sh file will be run by the docker build process
 
-RUN apk del tar xz curl
-
-ENTRYPOINT ["/env/bin/python", "/app/main.py"]
+ENTRYPOINT ["/usr/local/bin/python", "/app/main.py"]

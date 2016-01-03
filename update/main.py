@@ -174,7 +174,7 @@ def get_video_size(video_url, size=16 * 1024):
 
     # ask avprobe for the size of the image
     process = subprocess.Popen(
-            ["timeout", "ffprobe", "-"], shell=False, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            ["timeout", "10s", "ffprobe", "-"], shell=False, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     stdout, stderr = process.communicate(response.content)
 
@@ -256,7 +256,7 @@ def update_item_previews(database, items):
 
             # generate thumbnail
             png_bytes = subprocess.check_output([
-                "timeout",
+                "timeout", "10s",
                 "ffmpeg", "-loglevel", "panic", "-y", "-i", url,
                 "-vf", "scale=8:-1", "-frames", "1",
                 "-f", "image2", "-vcodec", "png", "-"])
