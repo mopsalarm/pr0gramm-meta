@@ -266,11 +266,10 @@ def update_item_previews(database, items):
 
             preview = bytearray()
             for r, g, b in image.getdata():
-                # rrrrrggg gggbbbbb
-                first = (r & 0xf8) | (g >> 5)
-                second = ((g >> 2) & 0x7) | (b >> 3)
-                preview.append(first)
-                preview.append(second)
+                # convert to rgb565
+                pixel = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+                preview.append(pixel >> 8)
+                preview.append(pixel & 0xff)
 
             with database, database.cursor() as cursor:
                 cursor.execute("INSERT INTO item_previews VALUES (%s, %s, %s, %s) ON CONFLICT(id) DO NOTHING",
