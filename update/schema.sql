@@ -64,6 +64,7 @@ CREATE INDEX IF NOT EXISTS tags__tag_full ON tags USING GIN (to_tsvector('simple
 CREATE INDEX IF NOT EXISTS users__name ON users(lower("name") text_pattern_ops);
 CREATE INDEX IF NOT EXISTS user_score__user_id__timestamp ON user_score(user_id, "timestamp");
 CREATE INDEX IF NOT EXISTS items_bestof__score ON items_bestof(score);
+CREATE INDEX IF NOT EXISTS items__created_ts ON items(to_timestamp(created));
 
 -- not used right now
 -- CREATE INDEX IF NOT EXISTS items__username ON items(lower(username));

@@ -183,9 +183,20 @@ def get_video_size(video_url, size=16 * 1024):
     return int(width), int(height)
 
 
+def get_item_url(item):
+    if item.image.startswith("//"):
+        return "http:" + item.image
+    if item.image.startswith("http"):
+        return item.image
+    elif item.image.endswith((".mp4", ".webm")) :
+        return "http://vid.pr0gramm.com/" + item.image
+    else:
+        return "http://img.pr0gramm.com/" + item.image
+
+
 def get_item_size(item):
     filename = item.image.lower()
-    url = "http://img.pr0gramm.com/" + item.image
+    url = get_item_url(item)
 
     if filename.endswith((".jpg", ".jpeg", ".png", ".gif")):
         for byte_count in [1024, 4096, 8192, 16 * 1024, 64 * 1024]:
@@ -251,7 +262,7 @@ def update_item_previews(database, items):
         # noinspection PyBroadException
         try:
             filename = item.image.lower()
-            url = "http://img.pr0gramm.com/" + item.image
+            url = get_item_url(item)
             logger.debug("Update preview for {}", url)
 
             # generate thumbnail
